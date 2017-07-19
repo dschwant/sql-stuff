@@ -1,0 +1,19 @@
+select tbl_name = o.name
+ , idx_name = i.name
+ , dips.partition_number
+ , dips.index_type_desc
+ , dips.avg_fragmentation_in_percent
+ , p.data_compression_desc
+ , row_cnt = p.rows
+ , fg_name = fg.name
+ , partition_right_range = coalesce(try_cast(rp.value as date),rp.value)
+from sys.dm_db_index_physical_stats (DB_ID(), NULL, NULL, NULL, NULL) dips
+ join sys.objects o on dips.object_id = o.object_id
+ join sys.tables t on dips.object_id = t.object_id
+ join sys.indexes i on dips.object_id = i.object_id and dips.index_id = i.index_id
+ left join sys.partitions p on i.object_id = p.object_id and dips.partition_number = p.partition_number and dips.index_id = p.index_id
+ left join sys.filegroups fg on i.data_space_id = fg.data_space_id
+ left join sys.partition_schemes ps on i.data_space_id = ps.data_space_id
+ left join sys.partition_range_values rp
+  on rp.function_id = ps.function_id
+  and rp.boundary_id = p.partition_number
