@@ -17,3 +17,12 @@ from sys.dm_db_index_physical_stats (DB_ID(), NULL, NULL, NULL, NULL) dips
  left join sys.partition_range_values rp
   on rp.function_id = ps.function_id
   and rp.boundary_id = p.partition_number
+
+/*
+SELECT p.partition_number, fg.name, p.rows
+FROM sys.partitions p
+    INNER JOIN sys.allocation_units au
+    ON au.container_id = p.hobt_id
+    INNER JOIN sys.filegroups fg
+    ON fg.data_space_id = au.data_space_id
+*/
