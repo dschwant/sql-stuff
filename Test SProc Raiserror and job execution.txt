@@ -1,0 +1,224 @@
+/* This is setup to run in the DB "tstDB". Search for and change that to whatever DB it is run in */
+USE tstDB
+GO
+/*
+	Step #1 - Clear out test table, view and Sproc
+*/
+IF OBJECT_ID('TEST_TBL', 'U') IS NOT NULL
+        EXEC ('DROP TABLE TEST_TBL')
+IF OBJECT_ID('TEST_VW', 'V') IS NOT NULL
+        EXEC ('DROP VIEW TEST_VW')
+IF OBJECT_ID('TEST_SP', 'P') IS NOT NULL
+        EXEC ('DROP PROCEDURE TEST_SP')
+GO
+
+/*
+	Step #2 - Set up test table, view and Sproc, then run Sproc - Sproc run succeeds
+*/
+SELECT VAL = CAST(100000 AS INT) INTO TEST_TBL
+GO
+CREATE VIEW TEST_VW
+AS
+	SELECT 'TST' = 10000 * VAL FROM TEST_TBL
+GO
+CREATE PROCEDURE TEST_SP
+AS
+	BEGIN TRY
+		SELECT * FROM TEST_VW
+	END TRY
+	BEGIN CATCH
+		DECLARE @ERRORNUMBER INT = ERROR_NUMBER();
+		DECLARE @ERRORSEVERITY INT = ERROR_SEVERITY();
+		DECLARE @ERRORSTATE INT = ERROR_STATE();
+		DECLARE @ERRORPROCEDURE NVARCHAR(4000) = ERROR_PROCEDURE();
+		DECLARE @ERRORLINE INT = ERROR_LINE();
+		DECLARE @ERRORMESSAGE NVARCHAR(4000) = ERROR_MESSAGE();
+		SELECT ERRORNUMBER = @ERRORNUMBER
+			, ERRORSEVERITY = @ERRORSEVERITY
+			, ERRORSTATE = @ERRORSTATE
+			, ERRORPROCEDURE = @ERRORPROCEDURE
+			, ERRORLINE = @ERRORLINE
+			, ERRORMESSAGE = @ERRORMESSAGE;
+		RAISERROR(@ERRORMESSAGE, @ERRORSEVERITY, @ERRORSTATE);
+	END CATCH
+GO
+
+EXEC TEST_SP
+GO
+
+/*
+	Step #3.1 - Rename table value and then run Sproc - will fail and error is reported
+*/
+EXEC sp_rename 'TEST_TBL', 'TEST_TBL2'
+GO
+EXEC TEST_SP
+GO
+EXEC sp_rename 'TEST_TBL2', 'TEST_TBL'
+GO
+EXEC TEST_SP
+
+/*
+	Step #3.2 - Up table value and then run Sproc - will fail and error is reported
+*/
+UPDATE TEST_TBL
+SET VAL = VAL * 10
+GO
+EXEC TEST_SP
+
+/*
+	Step #4 - Recreate Sproc without "RAISERROR" then run Sproc, rename table, run sproc, rename back and run sproc  
+	- will not fail for data problem
+	- will fail for schema problem
+*/
+
+DROP PROCEDURE TEST_SP
+GO
+CREATE PROCEDURE TEST_SP
+AS
+	BEGIN TRY
+		SELECT * FROM TEST_VW
+	END TRY
+	BEGIN CATCH
+		DECLARE @ERRORNUMBER INT = ERROR_NUMBER();
+		DECLARE @ERRORSEVERITY INT = ERROR_SEVERITY();
+		DECLARE @ERRORSTATE INT = ERROR_STATE();
+		DECLARE @ERRORPROCEDURE NVARCHAR(4000) = ERROR_PROCEDURE();
+		DECLARE @ERRORLINE INT = ERROR_LINE();
+		DECLARE @ERRORMESSAGE NVARCHAR(4000) = ERROR_MESSAGE();
+		
+		SELECT ERRORNUMBER = @ERRORNUMBER
+			, ERRORSEVERITY = @ERRORSEVERITY
+			, ERRORSTATE = @ERRORSTATE
+			, ERRORPROCEDURE = @ERRORPROCEDURE
+			, ERRORLINE = @ERRORLINE
+			, ERRORMESSAGE = @ERRORMESSAGE;
+	END CATCH
+GO
+EXEC TEST_SP
+GO
+EXEC sp_rename 'TEST_TBL', 'TEST_TBL2'
+GO
+EXEC TEST_SP
+GO
+EXEC sp_rename 'TEST_TBL2', 'TEST_TBL'
+GO
+EXEC TEST_SP
+GO
+
+/*
+	Step #5 - Add job to run Sproc without "RAISERROR", then run job, rename table and run again
+	- We would want the job to fail for data problem but it does not
+	- Will fail for schema problem
+*/
+EXEC msdb.dbo.sp_delete_job  
+    @job_name = 'test_sproc_fail'
+GO
+EXEC msdb.dbo.sp_add_job
+    @job_name = 'test_sproc_fail',
+	@owner_login_name ='cymer\l501665' 
+GO
+EXEC msdb.dbo.sp_add_jobserver 
+	@job_name = 'test_sproc_fail', 
+	@server_name = 'CSDWD-BIZDEV1'
+GO
+EXEC msdb.dbo.sp_add_jobstep
+    @job_name = 'test_sproc_fail',
+    @step_name = N'process step',
+    @subsystem = N'TSQL',
+    @command = 'exec tstDB.dbo.TEST_SP'
+GO
+EXEC msdb.dbo.sp_start_job @job_name = 'test_sproc_fail'
+GO
+-- Wait for job to finish and check history
+EXEC sp_rename 'TEST_TBL', 'TEST_TBL2'
+GO
+EXEC msdb.dbo.sp_start_job @job_name = 'test_sproc_fail'
+-- Wait for job to finish and check history
+GO
+EXEC sp_rename 'TEST_TBL2', 'TEST_TBL'
+GO
+EXEC msdb.dbo.sp_start_job @job_name = 'test_sproc_fail'
+-- Wait for job to finish and check history
+GO
+
+/*
+	Step #6 - Recreate Sproc with "RAISERROR", then run job, rename table and run again
+	- Job fails as it should for both cases.
+*/
+DROP PROCEDURE TEST_SP
+GO
+CREATE PROCEDURE TEST_SP
+AS
+	BEGIN TRY
+		SELECT * FROM TEST_VW
+	END TRY
+	BEGIN CATCH
+		DECLARE @ERRORNUMBER INT = ERROR_NUMBER();
+		DECLARE @ERRORSEVERITY INT = ERROR_SEVERITY();
+		DECLARE @ERRORSTATE INT = ERROR_STATE();
+		DECLARE @ERRORPROCEDURE NVARCHAR(4000) = ERROR_PROCEDURE();
+		DECLARE @ERRORLINE INT = ERROR_LINE();
+		DECLARE @ERRORMESSAGE NVARCHAR(4000) = ERROR_MESSAGE();
+		SELECT ERRORNUMBER = @ERRORNUMBER
+			, ERRORSEVERITY = @ERRORSEVERITY
+			, ERRORSTATE = @ERRORSTATE
+			, ERRORPROCEDURE = @ERRORPROCEDURE
+			, ERRORLINE = @ERRORLINE
+			, ERRORMESSAGE = @ERRORMESSAGE;
+		RAISERROR(@ERRORMESSAGE, @ERRORSEVERITY, @ERRORSTATE);
+	END CATCH
+GO
+EXEC msdb.dbo.sp_start_job @job_name = 'test_sproc_fail'
+GO
+-- Wait for job to finish and check history
+EXEC sp_rename 'TEST_TBL', 'TEST_TBL2'
+GO
+EXEC msdb.dbo.sp_start_job @job_name = 'test_sproc_fail'
+-- Wait for job to finish and check history
+GO
+EXEC sp_rename 'TEST_TBL2', 'TEST_TBL'
+GO
+EXEC msdb.dbo.sp_start_job @job_name = 'test_sproc_fail'
+-- Wait for job to finish and check history
+GO
+
+/*
+	Step #7 - Recreate Sproc with "THROW", then run job, rename table and run again
+	- Job fails as it should for both cases.
+*/
+DROP PROCEDURE TEST_SP
+GO
+CREATE PROCEDURE TEST_SP
+AS
+	BEGIN TRY
+		SELECT * FROM TEST_VW
+	END TRY
+	BEGIN CATCH
+		DECLARE @ERRORNUMBER INT = ERROR_NUMBER();
+		DECLARE @ERRORSEVERITY INT = ERROR_SEVERITY();
+		DECLARE @ERRORSTATE INT = ERROR_STATE();
+		DECLARE @ERRORPROCEDURE NVARCHAR(4000) = ERROR_PROCEDURE();
+		DECLARE @ERRORLINE INT = ERROR_LINE();
+		DECLARE @ERRORMESSAGE NVARCHAR(4000) = ERROR_MESSAGE();
+		SELECT ERRORNUMBER = @ERRORNUMBER
+			, ERRORSEVERITY = @ERRORSEVERITY
+			, ERRORSTATE = @ERRORSTATE
+			, ERRORPROCEDURE = @ERRORPROCEDURE
+			, ERRORLINE = @ERRORLINE
+			, ERRORMESSAGE = @ERRORMESSAGE;
+		RAISERROR(@ERRORMESSAGE, @ERRORSEVERITY, @ERRORSTATE);
+	END CATCH
+GO
+EXEC msdb.dbo.sp_start_job @job_name = 'test_sproc_fail'
+GO
+-- Wait for job to finish and check history
+EXEC sp_rename 'TEST_TBL', 'TEST_TBL2'
+GO
+EXEC msdb.dbo.sp_start_job @job_name = 'test_sproc_fail'
+-- Wait for job to finish and check history
+GO
+EXEC sp_rename 'TEST_TBL2', 'TEST_TBL'
+GO
+EXEC msdb.dbo.sp_start_job @job_name = 'test_sproc_fail'
+-- Wait for job to finish and check history
+GO
